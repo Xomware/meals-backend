@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint check
+        run: |
+          echo "No lint configured yet — skipping"
+
+      - name: Bundle Lambdas (dry run)
+        run: |
+          for fn_dir in functions/*/; do
+            fn_name=$(basename "$fn_dir")
+            echo "Bundling $fn_name..."
+            mkdir -p dist/$fn_name
+            cp -r "$fn_dir"* dist/$fn_name/
+            cp -r shared/* dist/$fn_name/
+            cp package.json dist/$fn_name/
+            cd dist/$fn_name && npm ci --omit=dev --ignore-scripts && cd ../..
+            echo "✓ $fn_name bundled"
+          done
