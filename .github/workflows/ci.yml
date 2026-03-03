@@ -33,6 +33,6 @@ jobs:
             cp -r "$fn_dir"* dist/$fn_name/
             cp -r shared/* dist/$fn_name/
             cp package.json dist/$fn_name/
-            cd dist/$fn_name && npm ci --omit=dev --ignore-scripts && cd ../..
+            cd dist/$fn_name && npm install --omit=dev --ignore-scripts && cd ../..
             echo "✓ $fn_name bundled"
           done
