@@ -1,0 +1,84 @@
+name: Deploy Lambdas
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  APP_NAME: meals
+  AWS_REGION: us-east-1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Bundle and Deploy Lambdas
+        run: |
+          FUNCTIONS=(
+            "authorizer:authorizer"
+            "meals-create:meals-create"
+            "meals-delete:meals-delete"
+            "meals-get:meals-get"
+            "meals-list:meals-list"
+            "meals-rate:meals-rate"
+            "meals-ratings:meals-ratings"
+            "meals-update:meals-update"
+          )
+
+          for entry in "${FUNCTIONS[@]}"; do
+            fn_dir="${entry%%:*}"
+            fn_name="${entry##*:}"
+            lambda_name="${APP_NAME}-${fn_name}"
+
+            echo "=== Bundling $fn_name ==="
+            rm -rf /tmp/bundle
+            mkdir -p /tmp/bundle
+
+            cp -r functions/$fn_dir/* /tmp/bundle/
+            cp -r shared/* /tmp/bundle/
+            cp package.json /tmp/bundle/
+
+            cd /tmp/bundle
+            npm ci --omit=dev --ignore-scripts
+            zip -r /tmp/${fn_name}.zip . -x '*.git*'
+            cd -
+
+            echo "=== Uploading $fn_name to S3 ==="
+            aws s3 cp /tmp/${fn_name}.zip s3://${{ secrets.LAMBDA_BUCKET }}/${fn_name}.zip
+
+            echo "=== Updating Lambda $lambda_name ==="
+            aws lambda update-function-code \
+              --function-name "$lambda_name" \
+              --s3-bucket "${{ secrets.LAMBDA_BUCKET }}" \
+              --s3-key "${fn_name}.zip" \
+              --publish
+
+            echo "✓ $fn_name deployed"
+          done
+
+      - name: Wait for updates to stabilize
+        run: |
+          for fn in authorizer meals-create meals-delete meals-get meals-list meals-rate meals-ratings meals-update; do
+            echo "Waiting for ${APP_NAME}-${fn}..."
+            aws lambda wait function-updated --function-name "${APP_NAME}-${fn}" 2>/dev/null || true
+          done
+          echo "All Lambda functions updated."
